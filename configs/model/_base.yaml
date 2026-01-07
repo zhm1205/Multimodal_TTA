@@ -1,0 +1,3 @@
+pretrained: true
+weights: null
+drop_rate: 0.2

@@ -1,0 +1,8 @@
+name: base
+kind: baseline
+training:
+  data:
+    poison:
+      enabled: false
+    transforms:
+      forbid_geom_aug: false

@@ -1,0 +1,4 @@
+run_name: default
+seed: 42
+deterministic: practical
+device: auto

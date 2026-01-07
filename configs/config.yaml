@@ -1,0 +1,15 @@
+defaults:
+  - dataset: brats19
+  - model: unet
+  - training: default
+  - task: brats19_seg
+  - _self_
+  - method: base
+
+
+hydra:
+  run:
+    dir: ${task.save_dir}/${task.run_name}/${now:%Y%m%d_%H%M%S}
+  output_subdir: .hydra     
+  job:
+    chdir: true            

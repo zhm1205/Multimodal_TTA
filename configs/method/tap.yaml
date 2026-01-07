@@ -1,0 +1,69 @@
+# @package _global_
+
+training:
+  model_save_start: 9999 # no need to save for minmin
+  model_save_freq: 10
+  epochs: 3
+  batch_size: 64
+  num_workers: 4
+  sampler:
+    name: pk
+    p: 32  # every batch 32 different patients
+    k: 2   # each patient 2 images
+  data:
+    poison:
+      enabled: false
+    transforms:
+      pixel_aug: false
+      forbid_geom_aug: true
+      normalize: false
+
+ue:
+  base_task_builder: mimic_cxr
+  store_dir: ${task.save_dir}/${task.run_name}/${now:%Y%m%d_%H%M%S}/noise
+  reid_margin: 0.2      # triplet loss margin
+  key:
+    type: classwise
+    from: field
+    field: meta.subject_id
+  algorithm:
+    kind: training_based
+    name: tap
+    params:
+      epsilon: 0.0313725        # 8/255
+      noise_step: 10             # N-step 内层 PGD 步数
+      step_size: 0.0039215      # 1/255
+      surrogate_step: 20             # S-step 每 epoch 多少个 batch
+  eot:
+    enabled: false
+    n: 3                        # 2~4 起步
+    geom_aug: true
+    pix_aug: true
+    same_on_batch: false        # true = 整个 batch 用同一随机参数
+
+  surrogates:
+    s_reid:
+      reid: true
+      pretrained: true
+      drop_rate: 0.2
+      backbone: efficientnet_b2
+      embed_dim: 128
+      optimizer: { name: adam, lr: 1e-5, weight_decay: 5e-4, betas: [0.9, 0.9999], eps: 1.0e-8 }
+      weights_path: /home/dengzhipeng/data/project/reid_ue/outputs/mimic_cxr_reid/clean/20250916_143337/checkpoints/checkpoints/best_model.pth
+
+    s_cls:
+      pretrained: true
+      backbone: resnet50
+      drop_rate: 0.2
+      num_classes: 13         
+      optimizer: { name: adam, lr: 1e-5, weight_decay: 5e-4, betas: [0.9, 0.9999], eps: 1.0e-8 }
+
+  io:
+    enabled: true
+    include_manifest: true
+    strategy: shards
+    shard_size: 2048
+    dtype: int8
+    save_from_epoch: 30
+    save_every: 10  
+

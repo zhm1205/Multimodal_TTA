@@ -1,0 +1,17 @@
+# @package _global_
+
+training:
+  data:
+    transforms:
+      forbid_geom_aug: true
+      normalize: false # poisoned dataset needs False on train
+      pixel_aug: true
+    poison:
+      enabled: true
+      perturb_type: classwise
+      apply_stage: before_normalize
+      # key: { type: classwise, from: index }; or key: { type: classwise, from: field, field: another_field }
+      key: { type: classwise, from: field, field: subject_id } 
+      source:
+        type: shards
+        manifest_path: /home/dengzhipeng/data/project/reid_ue/mimic_cxr_ue/outputs/mimic_cxr_ue_minmin/20250831_190411/noise/manifest.json

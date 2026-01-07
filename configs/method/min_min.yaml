@@ -1,0 +1,73 @@
+# @package _global_
+
+training:
+  model_save_start: 9999 # no need to save for minmin
+  model_save_freq: 10
+  epochs: 3
+  batch_size: 64
+  num_workers: 0
+  sampler:
+    name: pk
+    p: 32  # every batch 32 different patients
+    k: 2   # each patient 2 images
+  data:
+    poison:
+      enabled: false
+    transforms:
+      geom_aug: false
+      intensity_aug: false
+      normalize: false
+
+ue:
+  store_dir: ${task.save_dir}/${task.run_name}/${now:%Y%m%d_%H%M%S}/noise
+
+  key:
+    type: samplewise
+    from: field
+    field: case_id
+  algorithm:
+    kind: training_based
+    name: min_min
+    params:
+      epsilon: 0.0313725        # 8/255
+      noise_step: 10             # N-step 内层 PGD 步数
+      step_size: 0.0039215      # 1/255
+      surrogate_step: 20             # S-step 每 epoch 多少个 batch
+  eot:
+    enabled: false
+    n: 3                        # 2~4 起步
+    geom_aug: true
+    pix_aug: true
+    same_on_batch: false        # true = 整个 batch 用同一随机参数
+
+  surrogates:
+    s_seg:
+      backbone: unet
+      in_channels: 4          
+      num_classes: 4          
+      spatial_dims: 3         
+      channels: [32, 64, 128, 256, 512]
+      strides: [2, 2, 2, 2]
+      num_res_units: 2
+      norm: "INSTANCE"
+      act: "RELU"
+      dropout: 0.0
+      optimizer: { name: adam, lr: 5e-4, weight_decay: 5e-4, betas: [0.9, 0.9999], eps: 1.0e-8 }
+
+  # io:
+  #   enabled: true
+  #   include_manifest: true
+  #   strategy: shards
+  #   shard_size: 2048
+  #   dtype: int8
+  #   save_from_epoch: 30
+  #   save_every: 10  
+
+  io:
+    enabled: true
+    include_manifest: true
+    strategy: files
+    dtype: int8
+    save_from_epoch: 30
+    save_every: 10  
+

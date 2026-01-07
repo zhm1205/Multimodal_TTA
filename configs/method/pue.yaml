@@ -1,0 +1,99 @@
+# @package _global_
+
+training:
+  seed: 42
+  model_save_start: 9999        # min-min 不需要中途存
+  model_save_freq: 10
+  epochs: 3
+  batch_size: 64
+  num_workers: 4
+  sampler:
+    name: pk
+    p: 32                       # 每个 batch 32 个 ID
+    k: 2                        # 每个 ID 2 张图
+  data:
+    poison:
+      enabled: false
+    transforms:
+      pixel_aug: false
+      forbid_geom_aug: true
+      normalize: false          # 数据管道不归一化；插件内部会做 mean/std 归一化
+      mean: [0.485, 0.456, 0.406]
+      std:  [0.229, 0.224, 0.225]
+
+ue:
+  base_task_builder: mimic_cxr
+  store_dir: ${task.save_dir}/${task.run_name}/${now:%Y%m%d_%H%M%S}/noise
+
+  # ReID 损失的 margin
+  reid_margin: 0.2
+
+  # 键的来源：ID 级（classwise = subject_id），与你现有 noise_backend 约定一致
+  key:
+    type: classwise
+    from: field
+    field: meta.subject_id
+
+  # —— Random Weight Perturbation（论文一致，默认开启，常数 σ）——
+  rwp:
+    enabled: true               # 论文主方法 PUE：训练端 & 噪声端都开
+    sigma: 0.05                 # 对每个可训练参数加 N(0, σ^2) 临时噪声
+    U_train: 4                  # surrogate_step 内每步抽样次数（均值loss再一次反传）
+    U_noise: 8                  # noise_step 内每步抽样次数（均值梯度再一次PGD）
+    # warmup_steps: 0           # 如需 σ 线性升温再打开；默认常数 σ
+
+  # —— 生成算法（min-min / 训练式）——
+  algorithm:
+    kind: training_based
+    name: pue
+    params:
+      epsilon: 0.0313725        # 8/255 (ℓ∞ 半径)
+      noise_step: 10            # N-step：每次调用内的 PGD 步数
+      step_size: 0.0039215      # 1/255
+      surrogate_step: 20        # S-step：每个 epoch 做多少个 surrogate 训练 batch（由外层调度）
+      random_start: false       # 如需随机初始化 δ 可开；默认 0 启动
+
+  # —— Expectation over Transformations（你当前不用，保持关闭）——
+  eot:
+    enabled: false
+    n: 3
+    geom_aug: true
+    pix_aug: true
+    same_on_batch: false
+
+  # —— 代理模型（第一个条目会被优先取用）——
+  surrogates:
+    s_reid:
+      reid: true
+      pretrained: true
+      drop_rate: 0.2
+      backbone: efficientnet_b2
+      embed_dim: 128
+      optimizer:
+        name: adam
+        lr: 1.0e-5
+        weight_decay: 5.0e-4
+        betas: [0.9, 0.9999]
+        eps: 1.0e-8
+
+    s_cls:
+      pretrained: true
+      backbone: resnet50
+      drop_rate: 0.2
+      num_classes: 13
+      optimizer:
+        name: adam
+        lr: 1.0e-5
+        weight_decay: 5.0e-4
+        betas: [0.9, 0.9999]
+        eps: 1.0e-8
+
+  # —— 噪声IO（按分片保存噪声表；仅当需要持久化时才会生效）——
+  io:
+    enabled: true
+    include_manifest: true
+    strategy: shards
+    shard_size: 2048
+    dtype: int8
+    save_from_epoch: 30
+    save_every: 10

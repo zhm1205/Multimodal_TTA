@@ -1,0 +1,46 @@
+# @package _global_
+
+training:
+  data:
+    transforms:
+      forbid_geom_aug: true
+      normalize: false # poisoned dataset needs False on train
+    poison:
+      enabled: true
+      perturb_type: classwise
+      apply_stage: before_normalize
+      # key: { type: classwise, from: index }; or key: { type: classwise, from: field, field: another_field }
+      key: { type: classwise, from: field, field: subject_id } 
+      # source:
+      #   type: shards
+      #   manifest_path: ${experiment.save_dir}/ue/lsp/manifest.json
+      source:
+        type: provider
+        provider:
+          name: random_noise
+          params:
+            epsilon: 0.0313725
+            image_size: [3, 256, 256]
+            seed: 0
+            mode: gaussian
+            params: {}
+            tied_channels: true
+
+ue:
+  store_dir: ${task.save_dir}/${task.run_name}/${now:%Y%m%d_%H%M%S}/ue/random_noise
+  algorithm:
+    kind: training_free
+    name: random_noise
+    params:
+      epsilon: 0.0313725
+      mode: gaussian
+      params: { q: 0.05 }
+      tied_channels: true 
+  key:
+    type: classwise
+    from: field
+    field: subject_id
+  io:
+    strategy: shards
+    dtype: int8
+    shard_size: 1024

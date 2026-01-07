@@ -1,0 +1,59 @@
+# @package _global_
+# merge this file to global config
+
+dataset:
+  task: seg
+  # 如果你这里有 include/引用机制，把下面这句指向 dataset/brats24_gli_ssa_ped.yaml
+  # name: brats_multi_nifti
+  # ... 其余 dataset 具体参数在 dataset/brats24_gli_ssa_ped.yaml 里
+
+model:
+  in_channels: 4          # 4 modalities: t1n, t1c, t2w, t2f
+  num_classes: 3          # 3 regions: ET / TC / WT  (multi-label, sigmoid)
+  spatial_dims: 3
+  channels: [32, 64, 128, 256, 512]
+  strides: [2, 2, 2, 2]
+  num_res_units: 2
+  norm: "INSTANCE"
+  act: "RELU"
+  dropout: 0.0
+
+training:
+  data:
+    transforms:
+      normalize: false
+      geom_aug: false
+      intensity_aug: false
+      image_size: [160, 192, 160]
+
+      mean: [0.0, 0.0, 0.0, 0.0]
+      std:  [1.0, 1.0, 1.0, 1.0]
+
+  # 训练损失：需要是 multi-label（sigmoid）而非 softmax 多类
+  # 具体 loss 实现在 trainer 里怎么取用取决于你项目结构：
+  # - 如果你用 MONAI DiceCELoss：要 sigmoid=True, softmax=False, to_onehot_y=False
+  # - 如果你用 BCEWithLogits + Dice：同样对每个 region 独立
+  criterion:
+    # 这些字段名你可以继续保留，但含义要改为 multi-label 版本
+    # 建议你在构建 loss 时读取下面两个权重
+    lambda_dice: 1.0
+    lambda_bce:  1.0
+
+evaluation:
+  # 这里不再是 per-class(raw-id) 的 4 类，而是 3 个 region
+  per_class: true
+  class_names:
+    - ET
+    - TC
+    - WT
+
+  seg:
+    # evaluator 会读取 region_order + threshold
+    region_order: ["ET", "TC", "WT"]
+    threshold: 0.5
+
+  loss:
+    # evaluator 中 report_loss=true 才会额外报告一个 BCE+Dice 的 loss
+    report_loss: false
+    lambda_dice: 1.0
+    lambda_bce:  1.0

@@ -1,0 +1,4 @@
+defaults:
+  - _base
+name: unet
+num_classes: 1

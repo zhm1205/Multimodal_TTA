@@ -1,0 +1,36 @@
+data:
+  # 原始 BraTS19 根目录，下面通常有 HGG / LGG 子目录
+  raw_root: /home/dengzhipeng/data/brain/brats19/MICCAI_BraTS_2019_Data_Training
+
+  # name_mapping.csv 的路径
+  name_mapping_csv: /home/dengzhipeng/data/brain/brats19/MICCAI_BraTS_2019_Data_Training/name_mapping.csv
+
+  # 预处理结果保存目录
+  preproc_root: /home/dengzhipeng/data/brain_processed/brats19
+
+  # 通道顺序（按文件名关键词匹配）
+  modalities: [flair, t1, t1ce, t2]
+
+  # 标签重映射规则（原始→目标）
+  label_remap:
+    0: 0
+    1: 1
+    2: 2
+    4: 3
+
+  # 目标体素尺寸（H, W, D），在这里统一 resize 到该大小
+  target_shape: [160, 160, 160]
+
+  # z-score 后的截断阈值 |z|<=z_clip
+  z_clip: 5.0
+
+  # 是否把 clip 后的 z-score 映射到 [0,1]
+  to_01: true
+
+  # train / val / test 划分比例（会自动归一化，不必严格相加为 1）
+  split_ratio: [0.7, 0.15, 0.15]
+
+  # 随机种子，控制划分稳定
+  split_seed: 42
+
+  run_preprocess: false

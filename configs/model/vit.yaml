@@ -1,0 +1,3 @@
+defaults:
+  - _base
+name: vit_b_16

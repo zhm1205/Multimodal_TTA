@@ -1,0 +1,19 @@
+{
+    "folders": [
+        {
+            "name": "brain_processed",
+            "path": "/home/dengzhipeng/data/brain_processed"
+        },
+        {
+            "name": "mmdg",
+            "path": "/home/dengzhipeng/project/mmdg"
+        },
+        {
+            "name": "outputs",
+            "path": "/home/dengzhipeng/data/project/mmdg/outputs"
+        }
+    ],
+    "settings": {
+
+  }
+}

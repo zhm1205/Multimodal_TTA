@@ -1,0 +1,75 @@
+# Default training configuration for a machine learning model
+epochs: 100
+batch_size: 64
+eval_batch_size: 16
+num_workers: 16
+distributed: false
+gpu_ids: [0]
+
+model_save_start: 9999
+model_save_freq: 10
+
+optimizer: adam   # adam / adamw
+
+data:
+    transforms:
+      image_size: [4, 160, 160, 160]
+      mean: [0.0, 0.0, 0.0, 0.0]
+      std:  [1.0, 1.0, 1.0, 1.0]
+
+optimizers:
+  sgd:
+    lr: 1e-4
+    weight_decay: 0.0001
+    momentum: 0.9
+    nesterov: false
+    dampening: 0.0
+    foreach: null
+    maximize: false
+
+  adam:
+    lr: 1.0e-5
+    weight_decay: 5e-4
+    betas: [0.9, 0.9999]
+    eps: 1.0e-8
+    amsgrad: false
+    foreach: null
+    maximize: false
+    capturable: false
+    differentiable: false
+
+  adamw:
+    lr: 5.0e-4
+    weight_decay: 0.05        
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+    amsgrad: false
+    foreach: null
+    maximize: false
+    capturable: false
+    differentiable: false
+    fused: null              
+
+# remove weight decay for bias/Norm
+param_groups:
+  no_decay_keys: ["bias", "bn", "norm", "LayerNorm"]
+  treat_1d_as_no_decay: true
+
+scheduler:
+  name: none   # none | step | multistep | cosine | lr
+  args:
+    milestones: [100, 150]  
+    gamma: 0.1
+    # step_size: 30       
+    # T_max: 200          
+    # eta_min: 0.0
+    reduce_on_plateau:
+      factor: 0.1
+      patience: 2
+      min_lr: 1.0e-7
+
+early_stopping:
+  enabled: false
+  patience: 10
+  min_delta: 0.0
+
