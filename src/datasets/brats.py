@@ -1,4 +1,3 @@
-# file: src/datasets/brats_multi_nifti.py
 """
 BraTS24 (GLI / SSA / PED) Multi-source NIfTI Dataset
 

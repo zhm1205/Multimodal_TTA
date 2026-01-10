@@ -56,9 +56,9 @@ class SegTrainer(TrainerBase):
           - 标签: y_id [B, ...]（class index），内部自动 one-hot
         """
         return DiceCELoss(
-            include_background=self.include_background,
+            include_background=True,
             to_onehot_y=False,          # 标签是 class index，[B,...]
-            sigmoid=True,              # 多类别，用 softmax
+            sigmoid=True,              # multi-label
             squared_pred=self.squared_pred,
             jaccard=self.jaccard,
             lambda_dice=self.lambda_dice,
@@ -100,7 +100,7 @@ class SegTrainer(TrainerBase):
         y_id = batch["label"].to(self.device) # 3D: [B,D,H,W]
 
         logits = self.model(x)                       # [B,num_classes,D,H,W]
-        loss = self._loss(logits, y_id) # -> y: [B,1,D,H,W]
+        loss = self._loss(logits, y_id) # -> y: [B,3,D,H,W]
         loss.backward()
         self.optimizer.step()
 

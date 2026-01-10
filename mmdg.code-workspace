@@ -1,6 +1,14 @@
 {
     "folders": [
         {
+            "name": "hecktor_raw",
+            "path": "/home/dengzhipeng/data/hecktor2021"
+        },
+        {
+            "name": "hecktor_processed",
+            "path": "/home/dengzhipeng/data/project/mmdg/hecktor21"
+        },
+        {
             "name": "brain_processed",
             "path": "/home/dengzhipeng/data/brain_processed"
         },

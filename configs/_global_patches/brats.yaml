@@ -54,6 +54,6 @@ evaluation:
 
   loss:
     # evaluator 中 report_loss=true 才会额外报告一个 BCE+Dice 的 loss
-    report_loss: false
+    report_loss: true
     lambda_dice: 1.0
     lambda_bce:  1.0

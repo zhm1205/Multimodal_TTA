@@ -1,0 +1,49 @@
+# configs/hecktor21_preproc.yaml
+
+# -------- input --------
+bbox_csv: /home/dengzhipeng/data/hecktor2021/hecktor2021_train/hecktor2021_bbox_training.csv
+info_csv: /home/dengzhipeng/data/hecktor2021/hecktor2021_train/hecktor2021_patient_info_training.csv
+
+nii_root: /home/dengzhipeng/data/hecktor2021/hecktor2021_train/hecktor_nii
+
+# -------- output --------
+out_root: /home/dengzhipeng/data/project/mmdg/hecktor21
+out_manifest_csv: /home/dengzhipeng/data/project/mmdg/hecktor21/manifest.csv
+
+# optional derived csv exports (for convenience only; manifest.csv is the source of truth)
+export_per_domain_csv: true
+
+# -------- processing --------
+# recommended default: bbox is ~144mm cube; 144^3 gives ~1mm isotropic in the cropped ROI
+target_size: [144, 144, 144]
+
+# padding values when bbox exceeds image bounds
+pad_value_ct: -1024.0
+pad_value_pt: 0.0
+pad_value_mask: 0
+
+# interpolators
+interp_img: linear      # CT/PET
+interp_mask: nearest    # label
+
+# dtype controls
+save_float_dtype: float32
+save_mask_dtype: uint8
+
+# -------- split (optional) --------
+# center code is inferred by PatientID prefix (first 4 letters), e.g., CHGJ007 -> CHGJ
+enable_split: true
+seed: 2026
+val_per_center: 5
+
+# define your domains (edit as needed)
+source_centers: ["CHGJ", "CHUS", "CHUM"]   # Canada as source
+target_centers: ["CHUP", "CHMR"]          # CHUP + HMR-as-target
+
+# policy for centers not listed above
+other_centers_policy: ignore   # {ignore, source, target}
+
+# -------- filename pattern --------
+ct_suffix: _ct.nii.gz
+pt_suffix: _pt.nii.gz
+gt_suffix: _gtvt.nii.gz

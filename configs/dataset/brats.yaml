@@ -23,47 +23,59 @@ region_order: ["ET", "TC", "WT"]
 
 # ---- sources: GLI (source) / SSA+PED (target-only) ----
 sources:
-  - name: brats24_gli
+  - name: brats25_glipre
     profile: gli
-    csv_path: /home/dengzhipeng/data/brain_processed/BraTS24-GLI/processed.csv
+    csv_path: /home/dengzhipeng/data/brain_processed/BraTS25-GLIPRE/processed.csv
     include_splits:
       train: ["train"]
-      val:   []
-      test:  ["test"]
-    # BraTS 2024 官方 segmentation 评测区域定义（GLI/SSA/PED）
-    # Source: Synapse forum - "Performance Metrics for Segmentation Challenges"
-    # https://www.synapse.org/Synapse:syn53708249/discussion/619169
-    # GLI tissue evaluation: WT=(1,2,3), TC=(1,3), ET=(3)
+      val:   ["test"]
+      test:  []
     region_map:
       ET: [3]
       TC: [1, 3]
       WT: [1, 2, 3]
 
-  # - name: brats24_ssa
-  #   profile: ssa
-  #   csv_path: /home/dengzhipeng/data/brain_processed/BraTS23-SSA/processed.csv
+  # - name: brats24_gli
+  #   profile: gli
+  #   csv_path: /home/dengzhipeng/data/brain_processed/BraTS24-GLI/processed.csv
   #   include_splits:
-  #     train: []                 # target-only：不参与训练
-  #     val:   []                 # target-only：不参与验证
-  #     test:  ["train", "test"]   # target 测试：使用该数据集全部 split
-  #   # 同上 Synapse 官方口径：
-  #   # SSA tissue evaluation: WT=(1,2,3), TC=(1,3), ET=(3)
+  #     train: ["train"]
+  #     val:   []
+  #     test:  ["test"]
+  #   # BraTS 2024 官方 segmentation 评测区域定义（GLI/SSA/PED）
+  #   # Source: Synapse forum - "Performance Metrics for Segmentation Challenges"
+  #   # https://www.synapse.org/Synapse:syn53708249/discussion/619169
+  #   # GLI tissue evaluation: WT=(1,2,3), TC=(1,3), ET=(3)
   #   region_map:
   #     ET: [3]
   #     TC: [1, 3]
   #     WT: [1, 2, 3]
 
-  # - name: brats24_ped
-  #   profile: ped
-  #   csv_path: /home/dengzhipeng/data/brain_processed/BraTS24-PED/processed.csv
-  #   include_splits:
-  #     train: []                 # target-only：不参与训练
-  #     val:   []                 # target-only：不参与验证
-  #     test:  ["train", "test"]   # target 测试：使用该数据集全部 split
-  #   # 同上 Synapse 官方口径：
-  #   # PED raw labels: ET=1, NET=2, CC=3, ED=4
-  #   # PED tissue evaluation: WT=(1,2,3,4), TC=(1,2,3), ET=(1)
-  #   region_map:
-  #     ET: [1]
-  #     TC: [1, 2, 3]
-  #     WT: [1, 2, 3, 4]
+  - name: brats24_ssa
+    profile: ssa
+    csv_path: /home/dengzhipeng/data/brain_processed/BraTS23-SSA/processed.csv
+    include_splits:
+      train: []                 # target-only：不参与训练
+      val:   []                 # target-only：不参与验证
+      test:  ["train", "test"]   # target 测试：使用该数据集全部 split
+    # 同上 Synapse 官方口径：
+    # SSA tissue evaluation: WT=(1,2,3), TC=(1,3), ET=(3)
+    region_map:
+      ET: [3]
+      TC: [1, 3]
+      WT: [1, 2, 3]
+
+  - name: brats24_ped
+    profile: ped
+    csv_path: /home/dengzhipeng/data/brain_processed/BraTS24-PED/processed.csv
+    include_splits:
+      train: []                 # target-only：不参与训练
+      val:   []                 # target-only：不参与验证
+      test:  ["train", "test"]   # target 测试：使用该数据集全部 split
+    # 同上 Synapse 官方口径：
+    # PED raw labels: ET=1, NET=2, CC=3, ED=4
+    # PED tissue evaluation: WT=(1,2,3,4), TC=(1,2,3), ET=(1)
+    region_map:
+      ET: [1]
+      TC: [1, 2, 3]
+      WT: [1, 2, 3, 4]

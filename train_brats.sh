@@ -9,11 +9,14 @@ python main.py \
   model=unet \
   training=default \
   training.epochs=100 \
-  training.batch_size=8 \
-  training.eval_batch_size=8 \
+  training.batch_size=16 \
+  training.eval_batch_size=16 \
   training.num_workers=8 \
-  training.gpu_ids=[6] \
+  training.gpu_ids=[4,5] \
   training.model_save_start=0 \
   training.model_save_freq=10 \
   training.optimizer=adam \
   training.optimizers.adam.lr=1e-3
+
+pip install -U SimpleITK pandas numpy pyyaml tqdm
+python prepare_hecktor21.py --config configs/hecktor21.yaml
