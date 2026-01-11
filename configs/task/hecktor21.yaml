@@ -1,0 +1,8 @@
+defaults:
+  - /_global_patches: hecktor21 
+  - _base
+
+name: hecktor21
+# 模型权重和输出结果保存路径
+save_dir: /home/dengzhipeng/data/project/mmdg/outputs/hecktor21
+eval_strategy: seg_eval

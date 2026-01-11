@@ -5,4 +5,4 @@ defaults:
 name: brats
 # 模型权重和输出结果保存路径
 save_dir: /home/dengzhipeng/data/project/mmdg/outputs/brats
-eval_strategy: brats_seg_eval
+eval_strategy: seg_eval

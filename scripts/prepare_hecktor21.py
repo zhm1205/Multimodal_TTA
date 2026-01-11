@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import argparse
-import os
 import re
 from pathlib import Path
-from typing import Dict, Tuple, List, Any
+from typing import Dict, Tuple, List, Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -38,9 +37,6 @@ def ensure_dir(p: Path) -> None:
 
 
 def patient_center_code(patient_id: str) -> str:
-    """
-    HECKTOR patient ids typically start with 4-letter center code, e.g. CHGJ007 -> CHGJ.
-    """
     m = re.match(r"^([A-Za-z]{4})", patient_id)
     if not m:
         return "UNK"
@@ -97,6 +93,33 @@ def resample_to_reference(
     )
 
 
+def resample_to_spacing(
+    img: sitk.Image,
+    target_spacing: Tuple[float, float, float],
+    interpolator: int,
+    default_value: float,
+    out_pixel_type: int,
+) -> sitk.Image:
+    """
+    Resample `img` to target_spacing while preserving physical space (origin/direction) and FOV.
+    New size is computed from old_size * old_spacing / new_spacing (rounded).
+    """
+    old_spacing = np.array(list(img.GetSpacing()), dtype=np.float64)
+    old_size = np.array(list(img.GetSize()), dtype=np.int64)
+
+    new_spacing = np.array(list(target_spacing), dtype=np.float64)
+    new_size = np.round(old_size * (old_spacing / new_spacing)).astype(np.int64)
+    new_size = np.maximum(new_size, 1).tolist()
+
+    ref = sitk.Image([int(x) for x in new_size], out_pixel_type)
+    ref.SetSpacing([float(x) for x in new_spacing.tolist()])
+    ref.SetDirection(img.GetDirection())
+    ref.SetOrigin(img.GetOrigin())
+
+    out = sitk.Resample(img, ref, sitk.Transform(), interpolator, default_value, out_pixel_type)
+    return out
+
+
 def bbox_mm_to_index_roi(
     img: sitk.Image,
     x1: float, x2: float,
@@ -104,7 +127,7 @@ def bbox_mm_to_index_roi(
     z1: float, z2: float,
 ) -> Tuple[List[int], List[int], Dict[str, Any]]:
     """
-    Convert a physical-space bbox (mm) into an axis-aligned index ROI on img grid.
+    Convert a physical-space bbox (mm, ITK convention) into an axis-aligned index ROI on img grid.
     Robust to direction flips by converting all 8 corners and taking min/max.
     Returns:
       - start_index [i,j,k]
@@ -114,11 +137,10 @@ def bbox_mm_to_index_roi(
     xs = [x1, x2]
     ys = [y1, y2]
     zs = [z1, z2]
-
     corners = [(x, y, z) for x in xs for y in ys for z in zs]
+
     idxs = []
     for p in corners:
-        # continuous index in image grid
         ci = img.TransformPhysicalPointToContinuousIndex(p)
         idxs.append(ci)
 
@@ -127,9 +149,8 @@ def bbox_mm_to_index_roi(
     maxs = idxs.max(axis=0)
 
     start = np.floor(mins).astype(int)
-    end = np.ceil(maxs).astype(int)  # end index (inclusive-ish); we'll treat as inclusive bound
+    end = np.ceil(maxs).astype(int)
 
-    # We want an inclusive range [start, end], thus size = end-start+1
     size = (end - start + 1).astype(int)
 
     dbg = {
@@ -150,10 +171,6 @@ def pad_if_needed(
     roi_size: List[int],
     pad_value: float,
 ) -> Tuple[sitk.Image, List[int], Dict[str, Any]]:
-    """
-    If ROI extends outside image bounds, constant-pad image so ROI is valid.
-    Returns padded_img, new_start_idx, pad_debug
-    """
     img_size = np.array(list(img.GetSize()), dtype=int)
     start = np.array(start_idx, dtype=int)
     size = np.array(roi_size, dtype=int)
@@ -191,30 +208,73 @@ def crop_roi(img: sitk.Image, start_idx: List[int], roi_size: List[int]) -> sitk
     return sitk.RegionOfInterest(img, roi_size, start_idx)
 
 
-def resize_to_target(
+def compute_center_pad_crop_params(
+    cur_size: List[int],
+    target_size: List[int],
+) -> Tuple[List[int], List[int], List[int], List[int]]:
+    """
+    Compute center-aligned pad/crop params to transform cur_size -> target_size.
+    Returns:
+      pad_before, pad_after, crop_lower, crop_upper  (all length 3)
+    where:
+      - apply crop first (if needed), then pad (if needed) OR vice versa; we will implement as:
+        * if cur > target: Crop
+        * if cur < target: Pad
+      We output both for clarity; caller will apply crop then pad.
+    """
+    cur = np.array(cur_size, dtype=int)
+    tgt = np.array(target_size, dtype=int)
+    diff = tgt - cur  # positive => need pad; negative => need crop
+
+    pad_before = np.zeros(3, dtype=int)
+    pad_after = np.zeros(3, dtype=int)
+    crop_lower = np.zeros(3, dtype=int)
+    crop_upper = np.zeros(3, dtype=int)
+
+    for d in range(3):
+        if diff[d] >= 0:
+            # pad
+            pb = diff[d] // 2
+            pa = diff[d] - pb
+            pad_before[d] = pb
+            pad_after[d] = pa
+        else:
+            # crop
+            cut = -diff[d]
+            cl = cut // 2
+            cu = cut - cl
+            crop_lower[d] = cl
+            crop_upper[d] = cu
+
+    return pad_before.tolist(), pad_after.tolist(), crop_lower.tolist(), crop_upper.tolist()
+
+
+def apply_center_pad_crop(
     img: sitk.Image,
     target_size: List[int],
-    interpolator: int,
-    default_value: float,
-    out_pixel_type: int,
-) -> Tuple[sitk.Image, List[float]]:
+    pad_value: float,
+    pad_before: List[int],
+    pad_after: List[int],
+    crop_lower: List[int],
+    crop_upper: List[int],
+) -> sitk.Image:
     """
-    Resample img to target_size while preserving physical FOV of current img.
+    Apply center crop (if needed) then constant pad (if needed) to reach target_size.
     """
-    in_size = np.array(list(img.GetSize()), dtype=np.float64)
-    in_spacing = np.array(list(img.GetSpacing()), dtype=np.float64)
-    fov_mm = in_size * in_spacing  # physical extent covered by the image grid (approx)
+    # crop
+    if any(v > 0 for v in crop_lower) or any(v > 0 for v in crop_upper):
+        img = sitk.Crop(img, crop_lower, crop_upper)
 
-    target_size_np = np.array(target_size, dtype=np.float64)
-    new_spacing = (fov_mm / target_size_np).tolist()
+    # pad
+    if any(v > 0 for v in pad_before) or any(v > 0 for v in pad_after):
+        img = sitk.ConstantPad(img, pad_before, pad_after, pad_value)
 
-    ref = sitk.Image([int(x) for x in target_size], out_pixel_type)
-    ref.SetSpacing([float(s) for s in new_spacing])
-    ref.SetDirection(img.GetDirection())
-    ref.SetOrigin(img.GetOrigin())
-
-    out = sitk.Resample(img, ref, sitk.Transform(), interpolator, default_value, out_pixel_type)
-    return out, new_spacing
+    # final assert
+    if list(img.GetSize()) != [int(x) for x in target_size]:
+        raise RuntimeError(
+            f"[pad/crop] failed to reach target_size={target_size}, got={list(img.GetSize())}"
+        )
+    return img
 
 
 # -----------------------------
@@ -259,12 +319,10 @@ def assign_splits(
 
     df["domain"] = df["center_code"].map(domain_from_center)
 
-    # default split
     df["split"] = "ignore"
     df.loc[df["domain"] == "target", "split"] = "test"
     df.loc[df["domain"] == "source", "split"] = "train"
 
-    # center-stratified internal validation within source
     rng = np.random.RandomState(seed)
     for center in sorted(set(df.loc[df["domain"] == "source", "center_code"].tolist())):
         idxs = df.index[(df["domain"] == "source") & (df["center_code"] == center)].tolist()
@@ -296,12 +354,19 @@ def main():
     out_manifest_csv = Path(cfg["out_manifest_csv"])
     export_per_domain_csv = bool(cfg.get("export_per_domain_csv", False))
 
-    target_size = list(cfg.get("target_size", [144, 144, 144]))
+    # fixed spacing + fixed output size (after bbox crop)
+    target_spacing = cfg.get("target_spacing", [1.0, 1.0, 3.0])
+    target_spacing = (float(target_spacing[0]), float(target_spacing[1]), float(target_spacing[2]))
+
+    output_size = list(cfg.get("output_size", [144, 144, 48]))  # for 1x1x3mm + 144mm bbox
+    output_size = [int(x) for x in output_size]
+
     pad_value_ct = float(cfg.get("pad_value_ct", -1024.0))
     pad_value_pt = float(cfg.get("pad_value_pt", 0.0))
-    pad_value_mask = float(cfg.get("pad_value_mask", 0))
+    pad_value_mask = float(cfg.get("pad_value_mask", 0.0))
 
-    interp_img = get_interpolator(cfg.get("interp_img", "linear"))
+    interp_ct = get_interpolator(cfg.get("interp_ct", "linear"))
+    interp_pt = get_interpolator(cfg.get("interp_pt", "linear"))
     interp_mask = get_interpolator(cfg.get("interp_mask", "nearest"))
 
     save_float_dtype = cfg.get("save_float_dtype", "float32")
@@ -319,7 +384,6 @@ def main():
     target_centers = cfg.get("target_centers", [])
     other_centers_policy = cfg.get("other_centers_policy", "ignore")
 
-    # output dirs
     img_out_dir = out_root / "images"
     lab_out_dir = out_root / "labels"
     ensure_dir(img_out_dir)
@@ -339,11 +403,9 @@ def main():
     if "CenterID" not in df_info.columns:
         raise RuntimeError(f"info_csv missing 'CenterID'. Found: {list(df_info.columns)}")
 
-    # merge by PatientID
     df = pd.merge(df_bbox, df_info, on="PatientID", how="inner")
     df["center_code"] = df["PatientID"].apply(patient_center_code)
 
-    # assign split/domain
     df = assign_splits(
         df,
         enable_split=enable_split,
@@ -354,7 +416,6 @@ def main():
         other_policy=other_centers_policy,
     )
 
-    # process cases
     rows = []
     n_total = len(df)
     n_done = 0
@@ -364,11 +425,9 @@ def main():
         pid = str(r["PatientID"])
         center_code = str(r["center_code"])
         center_id = r.get("CenterID", None)
-
         domain = str(r.get("domain", ""))
         split = str(r.get("split", ""))
 
-        # skip ignored
         if split == "ignore" or domain == "ignore":
             n_skipped += 1
             continue
@@ -378,7 +437,6 @@ def main():
         gt_path = nii_root / f"{pid}{gt_suffix}"
 
         if not ct_path.exists() or not pt_path.exists() or not gt_path.exists():
-            # keep a record, but skip processing
             rows.append({
                 "patient_id": pid,
                 "center_code": center_code,
@@ -393,79 +451,95 @@ def main():
             n_skipped += 1
             continue
 
-        # bbox in mm
         x1, x2 = float(r["x1"]), float(r["x2"])
         y1, y2 = float(r["y1"]), float(r["y2"])
         z1, z2 = float(r["z1"]), float(r["z2"])
 
         try:
-            # read
-            ct = sitk.ReadImage(str(ct_path))
-            pt = sitk.ReadImage(str(pt_path))
-            gt = sitk.ReadImage(str(gt_path))
+            # ---- read raw ----
+            ct_raw = sitk.ReadImage(str(ct_path))
+            pt_raw = sitk.ReadImage(str(pt_path))
+            gt_raw = sitk.ReadImage(str(gt_path))
 
-            ct_size_raw = list(ct.GetSize())
-            ct_spacing_raw = list(ct.GetSpacing())
-            pt_size_raw = list(pt.GetSize())
-            pt_spacing_raw = list(pt.GetSpacing())
+            ct_size_raw = list(ct_raw.GetSize())
+            ct_spacing_raw = list(ct_raw.GetSpacing())
+            pt_size_raw = list(pt_raw.GetSize())
+            pt_spacing_raw = list(pt_raw.GetSpacing())
 
-            # resample PET + mask to CT grid
-            pt_on_ct = resample_to_reference(
-                moving=pt,
+            # ---- 1) resample CT to fixed spacing (CT is the reference grid) ----
+            ct = resample_to_spacing(
+                img=ct_raw,
+                target_spacing=target_spacing,
+                interpolator=interp_ct,
+                default_value=pad_value_ct,
+                out_pixel_type=sitk.sitkFloat32,
+            )
+            ct_size_rs = list(ct.GetSize())
+            ct_spacing_rs = list(ct.GetSpacing())
+
+            # ---- 2) resample PET/GT to CT grid (no extra registration; just regrid) ----
+            pt = resample_to_reference(
+                moving=pt_raw,
                 reference=ct,
-                interpolator=interp_img,
+                interpolator=interp_pt,
                 default_value=pad_value_pt,
                 out_pixel_type=sitk.sitkFloat32,
             )
-            gt_on_ct = resample_to_reference(
-                moving=gt,
+            gt = resample_to_reference(
+                moving=gt_raw,
                 reference=ct,
                 interpolator=interp_mask,
                 default_value=pad_value_mask,
                 out_pixel_type=sitk.sitkUInt8,
             )
 
-            # bbox(mm) -> index ROI on CT grid
+            # ---- 3) bbox(mm) -> index ROI on CT grid ----
             start_idx, roi_size, dbg_roi = bbox_mm_to_index_roi(ct, x1, x2, y1, y2, z1, z2)
 
-            # pad if needed for each modality
+            # ---- 4) pad if bbox goes out of bounds (apply on each modality consistently) ----
             ct_pad, start_ct, dbg_pad_ct = pad_if_needed(ct, start_idx, roi_size, pad_value_ct)
-            pt_pad, start_pt, dbg_pad_pt = pad_if_needed(pt_on_ct, start_idx, roi_size, pad_value_pt)
-            gt_pad, start_gt, dbg_pad_gt = pad_if_needed(gt_on_ct, start_idx, roi_size, pad_value_mask)
+            pt_pad, start_pt, dbg_pad_pt = pad_if_needed(pt, start_idx, roi_size, pad_value_pt)
+            gt_pad, start_gt, dbg_pad_gt = pad_if_needed(gt, start_idx, roi_size, pad_value_mask)
 
-            # after padding, start index should match (we pad based on same start/roi)
-            # but to be safe, we use start_ct for all (they should be identical)
+            # pad_if_needed should yield the same start shift; use ct's start
             start_use = start_ct
 
-            # crop
+            # ---- 5) crop ROI ----
             ct_crop = crop_roi(ct_pad, start_use, roi_size)
             pt_crop = crop_roi(pt_pad, start_use, roi_size)
             gt_crop = crop_roi(gt_pad, start_use, roi_size)
 
-            # resize to target_size (preserve cropped FOV)
-            ct_rs, out_spacing = resize_to_target(
-                ct_crop, target_size, interp_img, pad_value_ct, sitk.sitkFloat32
-            )
-            pt_rs, _ = resize_to_target(
-                pt_crop, target_size, interp_img, pad_value_pt, sitk.sitkFloat32
-            )
-            gt_rs, _ = resize_to_target(
-                gt_crop, target_size, interp_mask, pad_value_mask, sitk.sitkUInt8
+            crop_size = list(ct_crop.GetSize())  # should match for all
+
+            # ---- 6) center pad/crop to fixed output_size (NO resize) ----
+            pad_before, pad_after, crop_lower, crop_upper = compute_center_pad_crop_params(
+                cur_size=crop_size,
+                target_size=output_size,
             )
 
-            # cast dtype
-            ct_rs = cast_float_dtype(ct_rs, save_float_dtype)
-            pt_rs = cast_float_dtype(pt_rs, save_float_dtype)
-            gt_rs = cast_mask_dtype(gt_rs, save_mask_dtype)
+            ct_out_img = apply_center_pad_crop(
+                ct_crop, output_size, pad_value_ct, pad_before, pad_after, crop_lower, crop_upper
+            )
+            pt_out_img = apply_center_pad_crop(
+                pt_crop, output_size, pad_value_pt, pad_before, pad_after, crop_lower, crop_upper
+            )
+            gt_out_img = apply_center_pad_crop(
+                gt_crop, output_size, pad_value_mask, pad_before, pad_after, crop_lower, crop_upper
+            )
 
-            # write output
+            # ---- 7) cast dtype ----
+            ct_out_img = cast_float_dtype(ct_out_img, save_float_dtype)
+            pt_out_img = cast_float_dtype(pt_out_img, save_float_dtype)
+            gt_out_img = cast_mask_dtype(gt_out_img, save_mask_dtype)
+
+            # ---- 8) write ----
             ct_out = img_out_dir / f"{pid}_ct.nii.gz"
             pt_out = img_out_dir / f"{pid}_pt.nii.gz"
             gt_out = lab_out_dir / f"{pid}_gtvt.nii.gz"
 
-            sitk.WriteImage(ct_rs, str(ct_out), useCompression=True)
-            sitk.WriteImage(pt_rs, str(pt_out), useCompression=True)
-            sitk.WriteImage(gt_rs, str(gt_out), useCompression=True)
+            sitk.WriteImage(ct_out_img, str(ct_out), useCompression=True)
+            sitk.WriteImage(pt_out_img, str(pt_out), useCompression=True)
+            sitk.WriteImage(gt_out_img, str(gt_out), useCompression=True)
 
             rows.append({
                 "patient_id": pid,
@@ -488,6 +562,9 @@ def main():
                 "pt_size_raw": ",".join(map(str, pt_size_raw)),
                 "pt_spacing_raw": ",".join([f"{x:.6f}" for x in pt_spacing_raw]),
 
+                "ct_size_resampled": ",".join(map(str, ct_size_rs)),
+                "ct_spacing_resampled": ",".join([f"{x:.6f}" for x in ct_spacing_rs]),
+
                 "bbox_x1": x1, "bbox_x2": x2,
                 "bbox_y1": y1, "bbox_y2": y2,
                 "bbox_z1": z1, "bbox_z2": z2,
@@ -499,8 +576,9 @@ def main():
                 "pad_ct_before": ",".join(map(str, dbg_pad_ct["pad_before"])),
                 "pad_ct_after": ",".join(map(str, dbg_pad_ct["pad_after"])),
 
-                "target_size": ",".join(map(str, target_size)),
-                "proc_spacing": ",".join([f"{x:.6f}" for x in out_spacing]),
+                "crop_size_before_fix": ",".join(map(str, crop_size)),
+                "final_output_size": ",".join(map(str, output_size)),
+                "final_spacing": ",".join([f"{x:.6f}" for x in target_spacing]),
             })
 
             n_done += 1
@@ -520,11 +598,9 @@ def main():
             })
             n_skipped += 1
 
-    # save manifest
     df_out = pd.DataFrame(rows)
     df_out.to_csv(out_manifest_csv, index=False)
 
-    # optional exports
     if export_per_domain_csv and len(df_out) > 0:
         src = df_out[df_out["domain"] == "source"].copy()
         tgt = df_out[df_out["domain"] == "target"].copy()
@@ -533,7 +609,6 @@ def main():
         if len(tgt) > 0:
             tgt.to_csv(out_manifest_csv.with_name("target.csv"), index=False)
 
-    # simple summary
     print(f"[DONE] processed={n_done}, skipped={n_skipped}, total_in_merged_csv={n_total}")
     print(f"[MANIFEST] {out_manifest_csv}")
 

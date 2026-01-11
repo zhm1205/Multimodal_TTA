@@ -1,0 +1,71 @@
+# dataset/hecktor21.yaml
+name: hecktor21
+
+# ---- common ----
+manifest_csv: /home/dengzhipeng/data/project/mmdg/hecktor21/manifest.csv
+
+# 预处理已经统一 shape；dataset 只做强校验； 此处是预处理后的shape
+expected_shape: [144, 144, 48]
+
+# 只做有标签评测
+drop_unlabeled: true
+
+# manifest 列名（预处理输出的字段）
+patient_col: patient_id
+status_col: status
+split_col: split
+
+ct_col: ct_proc
+pt_col: pt_proc
+label_col: gtvt_proc
+
+# 用于过滤域的字段（二选一：center_code 或 center_id）
+center_code_col: center_code
+center_id_col: center_id
+
+# ---- modalities ----
+modality_order: ["ct", "pt"]   # 固定两通道
+
+# ---- sources/domains (关键：显式列出每个域) ----
+sources:
+  # ============ Source domains (参与 train/val) ============
+  - name: CHGJ
+    where:
+      center_code: ["CHGJ"]
+    include_splits:
+      train: ["train"]
+      val:   ["val"]
+      test:  []               # source 不参与 test（或你也可以让它参与）
+
+  - name: CHUS
+    where:
+      center_code: ["CHUS"]
+    include_splits:
+      train: ["train"]
+      val:   ["val"]
+      test:  []
+
+  - name: CHUM
+    where:
+      center_code: ["CHUM"]
+    include_splits:
+      train: ["train"]
+      val:   ["val"]
+      test:  []
+
+  # ============ Target-only domains (只参与 test) ============
+  - name: CHUP
+    where:
+      center_code: ["CHUP"]
+    include_splits:
+      train: []
+      val:   []
+      test:  ["test"]         # 你在 manifest 里给 target 设为 test
+
+  - name: CHMR
+    where:
+      center_code: ["CHMR"]   # 注意：HMR 在你的 patient_id 前缀里大概率是 CHMR
+    include_splits:
+      train: []
+      val:   []
+      test:  ["test"]

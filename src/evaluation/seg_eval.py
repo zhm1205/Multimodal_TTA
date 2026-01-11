@@ -148,8 +148,8 @@ def _safe_compute_asd(
             )
 
 
-@register_evaluation_strategy("brats_seg_eval")
-class BratsSegmentationEvaluationStrategy:
+@register_evaluation_strategy("seg_eval")
+class SegmentationEvaluationStrategy:
     """
     BraTS region-based evaluation (ET/TC/WT) for multi-source datasets.
 

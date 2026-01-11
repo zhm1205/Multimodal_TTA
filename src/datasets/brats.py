@@ -531,6 +531,8 @@ class BratsMultiNiftiBuilder(BaseDatasetBuilder):
             mean = get_config(tcfg, "mean", [0.0, 0.0, 0.0, 0.0])
             std = get_config(tcfg, "std", [1.0, 1.0, 1.0, 1.0])
 
+            intensity_policy = get_config(tcfg, "intensity_policy", None)
+
             # Use existing config field for shape check ONLY (no resize/crop/pad)
             image_size = get_config(tcfg, "image_size", None)
             if image_size is not None:
@@ -553,6 +555,8 @@ class BratsMultiNiftiBuilder(BaseDatasetBuilder):
                 expected_label_channels=EXPECTED_REGION_CHANNELS,
                 region_label_as_float=True,
                 image_size=image_size,   # <-- enables strict shape check in transforms.py
+                intensity_policy=intensity_policy,
+                channel_names=list(self.modality_order), # ["t1n", "t1c", "t2w", "t2f"]
             )
 
         expected_shape = overrides.get("expected_shape", self.expected_shape)

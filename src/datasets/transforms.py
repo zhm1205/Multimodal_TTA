@@ -1,19 +1,45 @@
 # file: src/utils/transforms.py
 from __future__ import annotations
 
-from typing import Callable, Tuple, Any, List, Sequence, Optional
+from typing import Callable, Tuple, Any, List, Sequence, Optional, Dict
 
 import torch
 from monai.transforms import (
     Compose,
     RandAxisFlipd,
     RandRotate90d,
-    RandScaleIntensityd,
-    RandShiftIntensityd,
+    RandScaleIntensity,
+    RandShiftIntensity,
 )
+
+try:
+    from omegaconf import DictConfig, OmegaConf
+    HAS_OMEGACONF = True
+except Exception:
+    DictConfig = Any  # type: ignore
+    OmegaConf = None  # type: ignore
+    HAS_OMEGACONF = False
+
 
 LabelTensor = torch.Tensor
 ImageTensor = torch.Tensor
+
+
+def _to_plain_dict(x: Any) -> Dict[str, Any]:
+    """
+    Convert Hydra/OmegaConf DictConfig (or plain dict) into a plain python dict.
+    """
+    if x is None:
+        return {}
+    if isinstance(x, dict):
+        return x
+    if HAS_OMEGACONF and isinstance(x, DictConfig):
+        return OmegaConf.to_container(x, resolve=True)  # type: ignore
+    # best-effort fallback
+    try:
+        return dict(x)
+    except Exception:
+        return {}
 
 
 def _build_3d_seg_transforms(
@@ -25,15 +51,13 @@ def _build_3d_seg_transforms(
     mean: Sequence[float] | None = None,
     std: Sequence[float] | None = None,
     # 用于防止 silent bug（例如 label 误带 channel 维）
-    # - None: 不做强校验（仅按维度自动判断 raw vs region）
-    # - 0:    强制 label 是 raw（[D,H,W] 或 [1,D,H,W]）
-    # - >0:   强制 label 是 region（[N,D,H,W] 且 N==expected_label_channels）
     expected_label_channels: Optional[int] = None,
-    # region label 输出 dtype：训练 sigmoid multi-label 通常用 float32
     region_label_as_float: bool = True,
-    # 仅做“尺寸一致性校验”，不做 resize/crop/pad。
-    # 期望格式：[D,H,W]，例如 [160,196,160]
     image_size: Optional[Sequence[int]] = None,
+    # NEW: intensity policy (Hydra DictConfig supported)
+    intensity_policy: Any = None,
+    # NEW: channel names aligned with dataset.modality_order, e.g. ["ct","pt"]
+    channel_names: Optional[Sequence[str]] = None,
 ) -> Callable[[ImageTensor, LabelTensor], Tuple[ImageTensor, LabelTensor]]:
     """
     3D segmentation transforms（仅一个 label 输入，按维度自动处理）：
@@ -42,7 +66,7 @@ def _build_3d_seg_transforms(
       image: [C, D, H, W] float32
       label:
         - raw label map: [D, H, W] 或 [1, D, H, W]
-        - region masks:  [N, D, H, W]   (N=3 for ET/TC/WT)
+        - region masks:  [N, D, H, W]
 
     输出:
       image: [C, D, H, W] float32
@@ -50,11 +74,10 @@ def _build_3d_seg_transforms(
         - raw:    [D, H, W] long
         - region: [N, D, H, W] float32 (默认) 或保持原 dtype（region_label_as_float=False）
 
-    注意：
-      - geom_aug / intensity_aug 仅在 train split 生效
-      - 这里的几何增强只用 Flip / Rotate90，不涉及插值，对 label/region 都安全
-      - normalize=True 时，最后做 per-channel (x-mean)/std
-      - image_size 仅用于强校验，不会触发任何在线 resize/crop/pad
+    设计说明：
+      - 几何增强（Flip/Rotate90）用 dict-transform，label 安全；
+      - 强度归一化（mean/std 或 intensity_policy: clip + masked z-score）在最后统一做；
+      - 强度增强（scale/shift）放在归一化之后，避免被归一化“抵消”。
     """
     split = str(split).lower()
     is_train = split == "train"
@@ -70,27 +93,49 @@ def _build_3d_seg_transforms(
             raise ValueError(f"[3DTransforms] image_size must be [D,H,W], got {list(image_size)}")
         expected_spatial = (int(image_size[0]), int(image_size[1]), int(image_size[2]))
 
-    xforms: List[Any] = []
-
+    # ---- GEOM aug (dict transforms) ----
+    geom_xforms: List[Any] = []
     if geom_aug:
-        xforms.extend(
+        geom_xforms.extend(
             [
                 RandAxisFlipd(keys=["image", "label"], prob=0.5),
-                RandRotate90d(keys=["image", "label"], prob=0.3, max_k=3),
+                RandRotate90d(keys=["image", "label"], prob=0.3, max_k=3, spatial_axes=(1, 2)),
             ]
         )
+    geom_compose = Compose(geom_xforms)
 
+    # ---- INTENSITY aug (image-only, after normalization) ----
+    # keep same hyperparams as your original code (avoid extra config complexity)
+    int_xforms: List[Any] = []
     if intensity_aug:
-        xforms.extend(
+        int_xforms.extend(
             [
-                RandScaleIntensityd(keys=["image"], factors=0.1, prob=0.5),
-                RandShiftIntensityd(keys=["image"], offsets=0.1, prob=0.5),
+                RandScaleIntensity(factors=0.1, prob=0.5),
+                RandShiftIntensity(offsets=0.1, prob=0.5),
             ]
         )
 
-    monai_compose = Compose(xforms)
+    # ---- intensity policy parsing ----
+    ip = _to_plain_dict(intensity_policy)
+    ip_enabled = bool(ip.get("enabled", False))
+    ip_channels = ip.get("channels", {}) if isinstance(ip.get("channels", {}), dict) else {}
+
+    # channel names: prefer explicit arg, otherwise policy.channel_names
+    if channel_names is None:
+        cn = ip.get("channel_names", None)
+        if isinstance(cn, (list, tuple)) and len(cn) > 0:
+            channel_names = [str(x) for x in cn]
 
     def _normalize_img(img: torch.Tensor) -> torch.Tensor:
+        """
+        Normalize image [C,D,H,W] by either:
+          (A) intensity_policy: per-channel clip + masked z-score
+          (B) legacy mean/std: per-channel (x-mean)/std
+
+        NOTE:
+          - This function does NOT change shape.
+          - No online resample/crop/pad is performed here.
+        """
         if not normalize:
             return img
 
@@ -99,6 +144,63 @@ def _build_3d_seg_transforms(
 
         c = int(img.shape[0])
 
+        # ========== (A) intensity_policy ==========
+        if ip_enabled:
+            # decide channel name list
+            if channel_names is None:
+                # fallback to indices if user didn't provide names
+                names = [str(i) for i in range(c)]
+            else:
+                if len(channel_names) != c:
+                    raise RuntimeError(
+                        f"[3DTransforms] len(channel_names)={len(channel_names)} != C={c}. "
+                        f"Please set dataset.modality_order (or transforms.channel_names) to match channels."
+                    )
+                names = [str(x) for x in channel_names]
+
+            out = img.clone()
+
+            for ci, name in enumerate(names):
+                rule = ip_channels.get(name, {})
+                if not isinstance(rule, dict):
+                    rule = {}
+
+                x = out[ci]
+
+                # clip
+                clip = rule.get("clip", None)
+                if isinstance(clip, (list, tuple)) and len(clip) == 2:
+                    lo = float(clip[0])
+                    hi = float(clip[1])
+                    x = torch.clamp(x, min=lo, max=hi)
+
+                # masked z-score
+                zc = rule.get("zscore", None)
+                if isinstance(zc, dict):
+                    masked = bool(zc.get("masked", True))
+                    mask_gt = float(zc.get("mask_gt", float("-inf")))
+                    eps = float(zc.get("eps", 1.0e-6))
+                    min_count = int(zc.get("min_count", 16))  # keep minimal safety; no extra config needed
+
+                    if masked:
+                        m = x > mask_gt
+                        if int(m.sum().item()) >= min_count:
+                            vals = x[m]
+                        else:
+                            vals = x.reshape(-1)
+                    else:
+                        vals = x.reshape(-1)
+
+                    mu = vals.mean()
+                    sd = vals.std(unbiased=False).clamp_min(eps)
+                    x = (x - mu) / sd
+
+                out[ci] = x
+
+            return out
+
+        # ========== (B) legacy mean/std ==========
+        # Keep backward compatibility with your existing configs (BraTS etc.)
         if mean is None:
             mean_t = torch.zeros(c, dtype=img.dtype, device=img.device)
         else:
@@ -181,7 +283,7 @@ def _build_3d_seg_transforms(
                 kind = "region"
 
         # ---------- prepare label for dict transforms ----------
-        # For dict transforms, keep channel-first convention:
+        # dict transforms need channel-first label:
         # - raw:    [D,H,W] -> [1,D,H,W]
         # - region: [N,D,H,W] keep as-is
         if kind == "raw":
@@ -199,36 +301,40 @@ def _build_3d_seg_transforms(
         if expected_spatial is not None:
             _check_spatial("label", label_in, expected_spatial)
 
+        # ---------- GEOM aug (dict) ----------
         data = {"image": image, "label": label_in}
-
-        out = monai_compose(data) if len(xforms) > 0 else data
+        out = geom_compose(data) if len(geom_xforms) > 0 else data
         img: torch.Tensor = out["image"]
         lbl: torch.Tensor = out["label"]
 
-        # after aug, shape should still be identical (flip/rot90 do not change shape)
         if expected_spatial is not None:
-            _check_spatial("image(after)", img, expected_spatial)
-            _check_spatial("label(after)", lbl, expected_spatial)
+            _check_spatial("image(after_geom)", img, expected_spatial)
+            _check_spatial("label(after_geom)", lbl, expected_spatial)
 
         # ---------- restore label shape & dtype ----------
         if kind == "raw":
             # [1,D,H,W] -> [D,H,W]
             if lbl.ndim != 4 or int(lbl.shape[0]) != 1:
                 raise ValueError(
-                    f"[3DTransforms] raw label after transform should be [1,D,H,W], got {tuple(lbl.shape)}"
+                    f"[3DTransforms] raw label after geom should be [1,D,H,W], got {tuple(lbl.shape)}"
                 )
             lbl = lbl[0].long()
         else:
             # keep [N,D,H,W]
             if lbl.ndim != 4:
                 raise ValueError(
-                    f"[3DTransforms] region label after transform should be [N,D,H,W], got {tuple(lbl.shape)}"
+                    f"[3DTransforms] region label after geom should be [N,D,H,W], got {tuple(lbl.shape)}"
                 )
             if region_label_as_float:
                 lbl = lbl.float()
 
-        # ---------- normalize at the end ----------
+        # ---------- normalize ----------
         img = _normalize_img(img)
+
+        # ---------- INTENSITY aug (image-only, after normalize) ----------
+        if len(int_xforms) > 0:
+            for t in int_xforms:
+                img = t(img)
 
         return img, lbl
 
@@ -246,17 +352,17 @@ def get_seg_transforms(
     std: Sequence[float] | None = None,
     expected_label_channels: Optional[int] = None,
     region_label_as_float: bool = True,
-    # 仅用于尺寸一致性校验，不做 resize/crop/pad。
-    # 直接用你现有配置 training.data.transforms.image_size: [D,H,W]
     image_size: Optional[Sequence[int]] = None,
+    # NEW:
+    intensity_policy: Any = None,
+    channel_names: Optional[Sequence[str]] = None,
 ) -> Callable[[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
     """
-    统一入口（当前仅支持 3D）：
+    统一入口（当前仅支持 3D）。
 
-    推荐用法（你现在的 ET/TC/WT 三通道训练）：
-      expected_label_channels: 3
-      region_label_as_float: true
-      image_size: [160,196,160]  # 仅校验，不会触发 resize/crop/pad
+    NEW:
+      - intensity_policy: DictConfig/dict，支持每通道 clip + masked z-score
+      - channel_names: 与 dataset.modality_order 对齐，用于匹配 policy.channels 的 key
     """
     if ndim != 3:
         raise ValueError(f"get_seg_transforms currently only supports 3D (ndim=3). Got ndim={ndim}")
@@ -271,4 +377,6 @@ def get_seg_transforms(
         expected_label_channels=expected_label_channels,
         region_label_as_float=region_label_as_float,
         image_size=image_size,
+        intensity_policy=intensity_policy,
+        channel_names=channel_names,
     )

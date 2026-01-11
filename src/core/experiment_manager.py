@@ -373,8 +373,8 @@ class ExperimentManager:
         task_lower = self.task_name.lower()
         is_seg_task = (
             "seg" in task_lower or 
-            "nifti" in task_lower or 
-            "brats" in task_lower
+            "brats" in task_lower or
+            "hecktor21" in task_lower
         )
         
         if is_seg_task:
@@ -385,12 +385,6 @@ class ExperimentManager:
                 self.optimizer,
                 self.scheduler,
                 evaluation_strategy
-            )
-        elif "ue" in task_lower:
-            # UE tasks require additional modules
-            raise NotImplementedError(
-                "UE tasks require ue_providers, ue_orchestrator, and ue_keys modules. "
-                "Please ensure these modules are available or use segmentation tasks only."
             )
         else:
             raise ValueError(f"Unknown trainer type: {self.task_name}")

@@ -8,7 +8,14 @@ from .brats import (
     BratsMultiNiftiBuilder,
 )
 
+from .hecktor21 import (
+    Hecktor21Dataset,
+    Hecktor21Builder,
+)
+
 
 __all__ = [
     'BratsMultiSourceNiftiDataset',
+    'Hecktor21Dataset',
+    'Hecktor21Builder',
 ]

@@ -13,9 +13,11 @@ out_manifest_csv: /home/dengzhipeng/data/project/mmdg/hecktor21/manifest.csv
 # optional derived csv exports (for convenience only; manifest.csv is the source of truth)
 export_per_domain_csv: true
 
+# fixed spacing for ALL cases (CT becomes reference grid)
+target_spacing: [1.0, 1.0, 3.0]
+
 # -------- processing --------
-# recommended default: bbox is ~144mm cube; 144^3 gives ~1mm isotropic in the cropped ROI
-target_size: [144, 144, 144]
+target_size: [144, 144, 48]
 
 # padding values when bbox exceeds image bounds
 pad_value_ct: -1024.0
@@ -29,6 +31,12 @@ interp_mask: nearest    # label
 # dtype controls
 save_float_dtype: float32
 save_mask_dtype: uint8
+
+
+# --- filename suffixes ---
+ct_suffix: _ct.nii.gz
+pt_suffix: _pt.nii.gz
+gt_suffix: _gtvt.nii.gz
 
 # -------- split (optional) --------
 # center code is inferred by PatientID prefix (first 4 letters), e.g., CHGJ007 -> CHGJ

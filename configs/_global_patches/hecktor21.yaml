@@ -8,8 +8,8 @@ dataset:
   # ... 其余 dataset 具体参数在 dataset/brats24_gli_ssa_ped.yaml 里
 
 model:
-  in_channels: 4          # 4 modalities: t1n, t1c, t2w, t2f
-  num_classes: 3          # 3 regions: ET / TC / WT  (multi-label, sigmoid)
+  in_channels: 2          # 2 modalities: ct, pt
+  num_classes: 1          # 1 class: gtvt
   spatial_dims: 3
   channels: [32, 64, 128, 256, 512]
   strides: [2, 2, 2, 2]
@@ -19,15 +19,38 @@ model:
   dropout: 0.0
 
 training:
+  eval_on_train: false
   data:
     transforms:
-      normalize: false
+      normalize: true
+      image_size: [48, 144, 144] # [D,H,W] 这里是送入模型的shape
+      intensity_policy:
+        enabled: true
+        # 通道名和 dataset 的 modality_order 对齐，避免“第0通道到底是谁”的歧义
+        channel_names: ["ct", "pt"]
+
+        # 每个通道一套策略
+        channels:
+          ct:
+            clip: [-1000, 1000]          # HU clip
+            zscore:
+              masked: true
+              mask_gt: -900            # 只用 > -1000 的体素估计均值方差
+              eps: 1.0e-6
+
+          pt:
+            clip: [0.0, 15.0]           # SUV clip
+            zscore:
+              masked: true
+              mask_gt: 0.0             # 只用 >0 的体素估计均值方差（排除背景）
+              eps: 1.0e-6
+
+      # 原有 mean/std 保留，作为 fallback（当 intensity_policy 未启用时）
+      mean: [0.0, 0.0]
+      std:  [1.0, 1.0]
+
       geom_aug: false
       intensity_aug: false
-      image_size: [160, 192, 160]
-
-      mean: [0.0, 0.0, 0.0, 0.0]
-      std:  [1.0, 1.0, 1.0, 1.0]
 
   # 训练损失：需要是 multi-label（sigmoid）而非 softmax 多类
   # 具体 loss 实现在 trainer 里怎么取用取决于你项目结构：
@@ -37,25 +60,24 @@ training:
     # 这些字段名你可以继续保留，但含义要改为 multi-label 版本
     # 建议你在构建 loss 时读取下面两个权重
     task: multilabel
-    lambda_dice: 1.0
-    lambda_bce:  1.0
-    include_background: true
+    lambda_dice: 5.0
+    lambda_ce:  1.0
+    include_background: false
     squared_pred: false
     jaccard: false
     sigmoid: true           # use sigmoid for multilabel
+    ce_weight: [10.0]
 
 evaluation:
   # 这里不再是 per-class(raw-id) 的 4 类，而是 3 个 region
   per_class: true
   class_names:
-    - ET
-    - TC
-    - WT
+    - gtvt
 
   seg:
     # evaluator 会读取 region_order + threshold
-    region_order: ["ET", "TC", "WT"]
-    threshold: 0.5
+    region_order: ["gtvt"]
+    threshold: 0.3
 
   loss:
     # evaluator 中 report_loss=true 才会额外报告一个 BCE+Dice 的 loss
