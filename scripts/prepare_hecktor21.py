@@ -216,11 +216,7 @@ def compute_center_pad_crop_params(
     Compute center-aligned pad/crop params to transform cur_size -> target_size.
     Returns:
       pad_before, pad_after, crop_lower, crop_upper  (all length 3)
-    where:
-      - apply crop first (if needed), then pad (if needed) OR vice versa; we will implement as:
-        * if cur > target: Crop
-        * if cur < target: Pad
-      We output both for clarity; caller will apply crop then pad.
+    Apply: crop then pad.
     """
     cur = np.array(cur_size, dtype=int)
     tgt = np.array(target_size, dtype=int)
@@ -233,13 +229,11 @@ def compute_center_pad_crop_params(
 
     for d in range(3):
         if diff[d] >= 0:
-            # pad
             pb = diff[d] // 2
             pa = diff[d] - pb
             pad_before[d] = pb
             pad_after[d] = pa
         else:
-            # crop
             cut = -diff[d]
             cl = cut // 2
             cu = cut - cl
@@ -261,15 +255,12 @@ def apply_center_pad_crop(
     """
     Apply center crop (if needed) then constant pad (if needed) to reach target_size.
     """
-    # crop
     if any(v > 0 for v in crop_lower) or any(v > 0 for v in crop_upper):
         img = sitk.Crop(img, crop_lower, crop_upper)
 
-    # pad
     if any(v > 0 for v in pad_before) or any(v > 0 for v in pad_after):
         img = sitk.ConstantPad(img, pad_before, pad_after, pad_value)
 
-    # final assert
     if list(img.GetSize()) != [int(x) for x in target_size]:
         raise RuntimeError(
             f"[pad/crop] failed to reach target_size={target_size}, got={list(img.GetSize())}"
@@ -290,20 +281,23 @@ def assign_splits(
     other_policy: str,
 ) -> pd.DataFrame:
     """
-    Adds columns domain, split.
-    - target -> test
-    - source -> train/val with val_per_center per center
-    - others -> per policy
+    Adds columns: domain, split.
+    - If enable_split=False: domain=all, split=train for all rows (debug mode).
+    - If enable_split=True:
+        * target centers -> domain=target, split=test (ALL)
+        * source centers -> domain=source, split=train; then sample val_per_center per center => split=val
+        * others -> domain per other_policy (source/target/ignore), then split accordingly
     """
     df = df.copy()
+
     if not enable_split:
         df["domain"] = "all"
         df["split"] = "train"
         return df
 
-    source_centers = [c.upper() for c in source_centers]
-    target_centers = [c.upper() for c in target_centers]
-    other_policy = other_policy.lower().strip()
+    source_centers = [str(c).upper() for c in source_centers]
+    target_centers = [str(c).upper() for c in target_centers]
+    other_policy = str(other_policy).lower().strip()
 
     def domain_from_center(c: str) -> str:
         c = str(c).upper()
@@ -336,11 +330,93 @@ def assign_splits(
 
 
 # -----------------------------
+# CSV-only manifest builder
+# -----------------------------
+def build_manifest_csv_only(
+    df: pd.DataFrame,
+    nii_root: Path,
+    out_root: Path,
+    out_manifest_csv: Path,
+    export_per_domain_csv: bool,
+    ct_suffix: str,
+    pt_suffix: str,
+    gt_suffix: str,
+) -> pd.DataFrame:
+    """
+    Only writes a manifest CSV. Does NOT read or write images.
+    It still fills *_raw and expected *_proc paths for downstream convenience.
+    """
+    img_out_dir = out_root / "images"
+    lab_out_dir = out_root / "labels"
+    ensure_dir(img_out_dir)
+    ensure_dir(lab_out_dir)
+    ensure_dir(out_manifest_csv.parent)
+
+    rows = []
+    for _, r in df.iterrows():
+        pid = str(r["PatientID"])
+        center_code = str(r["center_code"])
+        center_id = r.get("CenterID", None)
+        domain = str(r.get("domain", ""))
+        split = str(r.get("split", ""))
+
+        if split == "ignore" or domain == "ignore":
+            continue
+
+        ct_path = nii_root / f"{pid}{ct_suffix}"
+        pt_path = nii_root / f"{pid}{pt_suffix}"
+        gt_path = nii_root / f"{pid}{gt_suffix}"
+
+        ct_out = img_out_dir / f"{pid}_ct.nii.gz"
+        pt_out = img_out_dir / f"{pid}_pt.nii.gz"
+        gt_out = lab_out_dir / f"{pid}_gtvt.nii.gz"
+
+        status = "ok" if (ct_path.exists() and pt_path.exists() and gt_path.exists()) else "missing_file"
+
+        rows.append({
+            "patient_id": pid,
+            "center_code": center_code,
+            "center_id": center_id,
+            "domain": domain,
+            "split": split,
+            "status": status,
+
+            "ct_raw": str(ct_path),
+            "pt_raw": str(pt_path),
+            "gtvt_raw": str(gt_path),
+
+            # expected processed paths (even if not yet generated)
+            "ct_proc": str(ct_out),
+            "pt_proc": str(pt_out),
+            "gtvt_proc": str(gt_out),
+        })
+
+    df_out = pd.DataFrame(rows)
+    df_out.to_csv(out_manifest_csv, index=False)
+
+    if export_per_domain_csv and len(df_out) > 0:
+        src = df_out[df_out["domain"] == "source"].copy()
+        tgt = df_out[df_out["domain"] == "target"].copy()
+        if len(src) > 0:
+            src.to_csv(out_manifest_csv.with_name("source.csv"), index=False)
+        if len(tgt) > 0:
+            tgt.to_csv(out_manifest_csv.with_name("target.csv"), index=False)
+
+    return df_out
+
+
+# -----------------------------
 # Main
 # -----------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True, help="Path to YAML config.")
+    ap.add_argument(
+        "--mode",
+        choices=["full", "split_only"],
+        default="full",
+        help="full: preprocess images and write nii.gz; split_only: only write/update manifest CSV (no IO for images).",
+    )
     ap.add_argument("--workers", type=int, default=1, help="Reserved for future; currently single-process.")
     args = ap.parse_args()
 
@@ -358,7 +434,7 @@ def main():
     target_spacing = cfg.get("target_spacing", [1.0, 1.0, 3.0])
     target_spacing = (float(target_spacing[0]), float(target_spacing[1]), float(target_spacing[2]))
 
-    output_size = list(cfg.get("output_size", [144, 144, 48]))  # for 1x1x3mm + 144mm bbox
+    output_size = list(cfg.get("output_size", [144, 144, 48]))
     output_size = [int(x) for x in output_size]
 
     pad_value_ct = float(cfg.get("pad_value_ct", -1024.0))
@@ -416,6 +492,25 @@ def main():
         other_policy=other_centers_policy,
     )
 
+    # ---- Mode: split_only ----
+    if args.mode == "split_only":
+        df_out = build_manifest_csv_only(
+            df=df,
+            nii_root=nii_root,
+            out_root=out_root,
+            out_manifest_csv=out_manifest_csv,
+            export_per_domain_csv=export_per_domain_csv,
+            ct_suffix=ct_suffix,
+            pt_suffix=pt_suffix,
+            gt_suffix=gt_suffix,
+        )
+        n_total = len(df)
+        n_used = len(df_out)
+        print(f"[SPLIT_ONLY DONE] merged_rows={n_total}, exported_rows={n_used}")
+        print(f"[MANIFEST] {out_manifest_csv}")
+        return
+
+    # ---- Mode: full preprocessing ----
     rows = []
     n_total = len(df)
     n_done = 0

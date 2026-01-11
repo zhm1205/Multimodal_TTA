@@ -8,13 +8,13 @@ python main.py \
   dataset=hecktor21 \
   model=unet \
   training=default \
-  training.epochs=100 \
-  training.batch_size=4 \
+  training.epochs=200 \
+  training.batch_size=8 \
   training.eval_batch_size=16 \
   training.num_workers=8 \
   training.gpu_ids=[0] \
   training.model_save_start=0 \
   training.model_save_freq=10 \
   training.optimizer=adam \
-  training.optimizers.adam.lr=1e-3 \
+  training.optimizers.adam.lr=3e-4 \
   training.eval_on_train=true

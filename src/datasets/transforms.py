@@ -98,7 +98,7 @@ def _build_3d_seg_transforms(
     if geom_aug:
         geom_xforms.extend(
             [
-                RandAxisFlipd(keys=["image", "label"], prob=0.5),
+                # RandAxisFlipd(keys=["image", "label"], prob=0.5),
                 RandRotate90d(keys=["image", "label"], prob=0.3, max_k=3, spatial_axes=(1, 2)),
             ]
         )
