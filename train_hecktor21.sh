@@ -18,7 +18,7 @@ SAVE_START=0
 SAVE_FREQ=10
 
 OPT="adam"
-LR="1e-3"
+LR="5e-3"
 
 EVAL_ON_TRAIN="true"
 
