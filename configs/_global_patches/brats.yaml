@@ -19,11 +19,11 @@ model:
   dropout: 0.0
 
 training:
-  eval_on_train: false
+  eval_on_train: true
   
   # val/test 共用同一套 schedule（0-based）
   eval_test:
-    start_epoch: 9        # 从第 0 个 epoch 开始允许评估
+    start_epoch: 0        # 从第 0 个 epoch 开始允许评估
     every_n_epochs: 5     # 每隔多少个 epoch 做一次
     run_last: true        # 最后一轮强制做一次
     do_val: true          # 是否做 val（val_loader 不为 None 才生效）

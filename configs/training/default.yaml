@@ -68,6 +68,13 @@ scheduler:
       patience: 2
       min_lr: 1.0e-7
 
+eval_test:
+  do_val: true           # 是否执行验证集评估
+  do_test: false         # 是否执行测试集评估
+  start_epoch: 0         # 从第0个epoch开始评估
+  every_n_epochs: 5      # 每5个epoch评估一次
+  run_last: true         # 最后一个epoch强制评估
+
 early_stopping:
   enabled: false
   patience: 10

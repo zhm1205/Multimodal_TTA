@@ -1,61 +1,50 @@
-#!/usr/bin/env bash
-set -euo pipefail
+# dataset/brats_tta.yaml (use BratsMultiNiftiBuilder from brats_raw)
+name: brats
 
-# =========================
-# Common config
-# =========================
-TASK="brats"
-MODEL="unet"
-TRAINING="default"
+# 离线预处理后应统一到固定 shape
+expected_shape: [160, 192, 160]
+strict_label_values: false
 
-EPOCHS=100
-BS=16
-EVAL_BS=16
-NUM_WORKERS=8
-GPU_IDS="[6, 7]"
+# 多源配置：GLIPRE 作为唯一源域；SSA/PED 仅作为测试域
+sources:
+  # 源域：GLIPRE，用于 train/val（以及可选的源域 test）
+  - name: brats25_glipre
+    profile: gli
+    csv_path: /home/dengzhipeng/data/brain_processed/BraTS25-GLIPRE/processed.csv
+    root_dir: null
+    include_splits:
+      train: ["train"]        # GLIPRE: 训练集使用 CSV 中 split=train 的样本
+      val:   ["test"]         # GLIPRE: 验证集使用 CSV 中 split=test 的样本
+      test:  []                # GLIPRE: 源域不再参与最终 test
+    region_map:
+      ET: [3]
+      TC: [1, 3]
+      WT: [1, 2, 3]
 
-SAVE_START=0
-SAVE_FREQ=10
+  # 目标域：SSA，仅作为测试集（所有 split 统一视为 test）
+  - name: brats23_ssa
+    profile: ssa
+    csv_path: /home/dengzhipeng/data/brain_processed/BraTS23-SSA/processed.csv
+    root_dir: null
+    include_splits:
+      train: []                 # 不参与训练
+      val:   []                 # 不参与验证
+      test:  ["train", "test"]  # 使用 train/test 作为测试集
+    region_map:
+      ET: [3]
+      TC: [1, 3]
+      WT: [1, 2, 3]
 
-OPT="adam"
-LR="1e-3"
-
-EVAL_ON_TRAIN="true"
-
-# =========================
-# Targets (edit to your 5 centers)
-# =========================
-TARGET_CENTERS=("brats25_glipre" "brats23_ssa" "brats24_ped")
-
-# Optional: a prefix for run_name
-RUN_PREFIX="brats_unet"
-
-# =========================
-# Run
-# =========================
-for TARGET in "${TARGET_CENTERS[@]}"; do
-  RUN_NAME="${RUN_PREFIX}_target-${TARGET}"
-
-  echo "============================================================"
-  echo "Running target_center=${TARGET} | run_name=${RUN_NAME}"
-  echo "============================================================"
-
-  python main.py \
-    task="${TASK}" \
-    task.run_name="${RUN_NAME}" \
-    dataset=brats \
-    dataset.target_domain="${TARGET}" \
-    model="${MODEL}" \
-    training="${TRAINING}" \
-    training.epochs="${EPOCHS}" \
-    training.batch_size="${BS}" \
-    training.eval_batch_size="${EVAL_BS}" \
-    training.num_workers="${NUM_WORKERS}" \
-    training.gpu_ids="${GPU_IDS}" \
-    training.model_save_start="${SAVE_START}" \
-    training.model_save_freq="${SAVE_FREQ}" \
-    training.optimizer="${OPT}" \
-    training.optimizers.adam.lr="${LR}" \
-    training.eval_on_train="${EVAL_ON_TRAIN}"
-done
-
+  # 目标域：PED，仅作为测试集（所有 split 统一视为 test）
+  - name: brats24_ped
+    profile: ped
+    csv_path: /home/dengzhipeng/data/brain_processed/BraTS24-PED/processed.csv
+    root_dir: null
+    include_splits:
+      train: []                 # 不参与训练
+      val:   []                 # 不参与验证
+      test:  ["train", "test"]  # 使用 train/test 作为测试集
+    region_map:
+      ET: [1]
+      TC: [1, 2, 3]
+      WT: [1, 2, 3, 4]

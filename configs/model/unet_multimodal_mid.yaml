@@ -1,0 +1,68 @@
+# configs/model/unet_multimodal_mid.yaml
+# Multi-modal UNet with mid-level fusion
+# ARCHITECTURE: Same as original UNet, only fusion method changes
+
+defaults:
+  - _base
+
+name: unet_multimodal_mid
+
+# ============================================================
+# MULTI-MODALITY SPECIFIC PARAMS (different from original UNet)
+# ============================================================
+num_modalities: 4         # Number of input modalities (replaces in_channels)
+                          # Input shape: [B, 4, D, H, W] → auto split to 4×[B, 1, D, H, W]
+
+# ============================================================
+# ORIGINAL UNET PARAMS (KEEP SAME AS BASE UNET)
+# ============================================================
+num_classes: 3            # Output channels (ET/TC/WT regions)
+spatial_dims: 3           # 3D medical images
+channels: [32, 64, 128, 256, 512]  # Encoder channel progression
+strides: [2, 2, 2, 2]              # Downsampling strides (4 downsamples)
+num_res_units: 2          # Residual units per block
+norm: "INSTANCE"          # Normalization type
+act: "RELU"               # Activation function
+dropout: 0.0              # Dropout rate
+
+# ============================================================
+# ARCHITECTURE EXPLANATION
+# ============================================================
+# Architecture is automatically derived from channels and strides:
+#
+#   Original UNet: 5 layers with 4 downsamples + 1 bottleneck
+#     Input: [B, 4, D, H, W] (4 channels concatenated)
+#     Layer1: 4→32   (stride=2, downsample)
+#     Layer2: 32→64  (stride=2, downsample)
+#     Layer3: 64→128 (stride=2, downsample)
+#     Layer4: 128→256 (stride=2, downsample)
+#     Layer5: 256→512 (stride=1, bottleneck)
+#     Output: [B, 3, D, H, W]
+#
+#   Multi-modal Mid Fusion: SPLIT architecture
+#     Input: [B, 4, D, H, W] → split to 4 modalities
+#     
+#     Branch (per modality, independent):
+#       Layer1: 1→32  (stride=2)
+#       Layer2: 32→64 (stride=2)
+#       Output: [B, 64, D/4, H/4, W/4] × 4
+#     
+#     Fusion (cross-modality attention):
+#       Input: 4×[B, 64, D/4, H/4, W/4]
+#       Output: [B, 64, D/4, H/4, W/4]
+#     
+#     Shared Encoder (same structure as original Layer3-5):
+#       Layer3: 64→128  (stride=2)
+#       Layer4: 128→256 (stride=2)
+#       Layer5: 256→512 (stride=1, bottleneck)
+#       Output: [B, 512, D/16, H/16, W/16]
+#     
+#     Decoder (mirrors all 5 encoder layers):
+#       Up5: 512→256 (stride=2)
+#       Up4: 256→128 (stride=2)
+#       Up3: 128→64  (stride=2)
+#       Up2: 64→32   (stride=2)
+#       Output: [B, 3, D, H, W]
+#
+# Parameter count: ~35M (vs ~31M for original UNet)
+# Difference: Independent branches (4×2 layers) vs single encoder (2 layers)

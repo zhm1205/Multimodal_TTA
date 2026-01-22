@@ -1,0 +1,56 @@
+# Multi-modal UNet with Shared-Specific Deep Feature Fusion
+# Model configuration for Brats datasets (glipre, ped, ssa)
+# Modalities: t1n, t1c, t2w, t2f
+# Fusion Strategy: DualNet_SS-style residual fusion at bottleneck level
+
+name: unet_multimodal_deepfusion
+
+# Input/Output
+num_modalities: 4  # t1n, t1c, t2w, t2f
+num_classes: 3     # ET, TC, WT
+spatial_dims: 3    # 3D volumes
+
+# Architecture (Full UNet3D encoder for both shared and specific)
+channels: [32, 64, 128, 256, 512]
+strides: [2, 2, 2, 2]  # 4 downsamples + 1 bottleneck (stride=1)
+num_res_units: 2
+
+# Normalization and Activation
+norm: "INSTANCE"  # Instance normalization
+act: "RELU"       # ReLU activation
+dropout: 0.0      # No dropout by default
+
+# Domain Classifier Configuration
+domain_classifier:
+  enabled: true       # Enable domain classifier module
+  loss_weight: 0.1    # Weight for domain classification loss
+                      # Set to 0 to disable domain loss during training
+                      # Recommended range: 0.0 - 0.5
+                      # 0.0: disabled (pure segmentation)
+                      # 0.1: light regularization (recommended)
+                      # 0.5: strong regularization
+
+# Architecture Notes:
+# 1. Shared Encoder: Full 5-layer UNet3D encoder (all modalities batch-processed)
+# 2. Specific Encoders: 4 independent full 5-layer UNet3D encoders (one per modality)
+# 3. Fusion Position: Bottleneck level [D/16, H/16, W/16] with 512 channels
+# 4. Fusion Method: Residual fusion - fused = shared + Conv(concat(shared, specific))
+# 5. Skip Connections: From shared encoder (averaged across modalities)
+# 6. Domain Classifier: Uses specific encoder bottleneck features [B*4, 512]
+
+# Training Notes:
+# 1. To disable domain classifier: Set domain_classifier.loss_weight=0
+# 2. Deep fusion (vs mid fusion): More independent learning, better modality-specific features
+# 3. Higher computational cost: 5 full UNet3D encoders (1 shared + 4 specific)
+# 4. Compatible with existing training pipeline (no code changes needed)
+# 5. Model outputs:
+#    - Segmentation logits: [B, 3, D, H, W]
+#    - Domain logits (optional): [B*4, 4] for auxiliary task
+
+# Example usage:
+# python main.py \
+#   task=brats \
+#   dataset=brats \
+#   dataset.target_domain=brats23_ssa \
+#   model=unet_multimodal_deepfusion \
+#   model.domain_classifier.loss_weight=0.1

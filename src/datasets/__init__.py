@@ -4,8 +4,8 @@ from ..registry import register_dataset
 
 # Import the dataset you actually use (NIfTI format)
 from .brats import (
-    BratsDataset,
-    BratsBuilder,
+    BratsMultiSourceNiftiDataset as BratsDataset,
+    BratsMultiNiftiBuilder as BratsBuilder,
 )
 
 from .hecktor21 import (

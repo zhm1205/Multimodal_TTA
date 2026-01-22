@@ -1,0 +1,72 @@
+# configs/model/unet_multimodal_late.yaml
+# Multi-modal UNet with late fusion (ensemble)
+# ARCHITECTURE: Same as original UNet, only fusion method changes
+
+defaults:
+  - _base
+
+name: unet_multimodal_late
+
+# ============================================================
+# MULTI-MODALITY SPECIFIC PARAMS (different from original UNet)
+# ============================================================
+num_modalities: 4         # Number of input modalities (replaces in_channels)
+                          # Input shape: [B, 4, D, H, W] → auto split to 4×[B, 1, D, H, W]
+
+# Late fusion method - how to combine predictions from 4 UNets
+# Options: "average" | "learned_weight" | "attention"
+fusion_type: "learned_weight"
+
+# ============================================================
+# ORIGINAL UNET PARAMS (KEEP SAME AS BASE UNET)
+# ============================================================
+num_classes: 3            # Output channels (ET/TC/WT regions)
+spatial_dims: 3           # 3D medical images
+channels: [32, 64, 128, 256, 512]  # Encoder channel progression
+strides: [2, 2, 2, 2]              # Downsampling strides (4 downsamples)
+num_res_units: 2          # Residual units per block
+norm: "INSTANCE"          # Normalization type
+act: "RELU"               # Activation function
+dropout: 0.0              # Dropout rate
+
+# ============================================================
+# ARCHITECTURE EXPLANATION
+# ============================================================
+# Each modality has its own complete UNet (ensemble approach):
+#
+#   Original UNet (single network):
+#     Input: [B, 4, D, H, W] (4 channels concatenated)
+#     Encoder: 4→32→64→128→256→512 (5 layers)
+#     Decoder: 512→256→128→64→32 (5 layers)
+#     Output: [B, 3, D, H, W]
+#     Params: ~31M
+#
+#   Multi-modal Late Fusion (4 independent UNets):
+#     Input: [B, 4, D, H, W] → split to 4 modalities
+#     
+#     UNet_modality1 (t1n): [B, 1, D, H, W] → [B, 3, D, H, W]
+#       Encoder: 1→32→64→128→256→512
+#       Decoder: 512→256→128→64→32
+#     
+#     UNet_modality2 (t1c): [B, 1, D, H, W] → [B, 3, D, H, W]
+#       (same architecture)
+#     
+#     UNet_modality3 (t2w): [B, 1, D, H, W] → [B, 3, D, H, W]
+#       (same architecture)
+#     
+#     UNet_modality4 (t2f): [B, 1, D, H, W] → [B, 3, D, H, W]
+#       (same architecture)
+#     
+#     Late Fusion:
+#       Input: 4×[B, 3, D, H, W] (4 prediction maps)
+#       Method: weighted average / attention
+#       Output: [B, 3, D, H, W]
+#
+# Parameter count: ~124M (31M × 4)
+# Advantage: Complete independence between modalities
+# Disadvantage: 4x more parameters than original UNet
+#
+# Fusion types:
+#   - "average": Simple average of 4 predictions (no learnable params)
+#   - "learned_weight": Weighted average with 4 learnable weights (4 params)
+#   - "attention": Spatial attention map for each modality (~100K params)
